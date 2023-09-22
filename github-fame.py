@@ -235,12 +235,8 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--num-parallel-requests", default=10, help="number of parallel requests to retrieve pull request changes")
     parser.add_argument("--include-unmerged", action="store_true", help="include unmerged pull requests")
     args = parser.parse_args()
-
-    # TODO: Name ok? Veröffentlichen?
     
     # TODO: Initial requests in parallel (parse maximum page, go through pages)
-    # TODO: Exclude globs can't use ** -- use regex instead? Or just cope with it? (fixed in python3.13)
-    # TODO: Maybe get rid of unidiff dependency?
 
     if args.token:
         GITHUB_TOKEN = args.token
