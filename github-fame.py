@@ -84,7 +84,7 @@ def response_for_api_path(uri: str, content_type: str = "application/vnd.github+
             raise
 
 
-def collect_paginated_json_results(base_uri: str, response_to_result_items: Callable[[object], list]):
+def collect_paginated_json_results(base_uri: str, response_to_result_items: Callable[[object], list], num_threads: int) -> list:
     response = response_for_api_path(base_uri)
 
     # https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28
@@ -94,23 +94,45 @@ def collect_paginated_json_results(base_uri: str, response_to_result_items: Call
         last_uri = link_headers["last"]
         last_page = int(parse_qs(urlparse(last_uri).query)["page"][0])
 
-    print(f"Collecting paginated result, requires {last_page - 1} more requests: ")
+    print(f"Collecting paginated result, requires {last_page - 1} more requests, using {num_threads} parallel connections: ")
+
+    parsed_pages = [None] * last_page
+    parsed_pages[0] = json.loads(response.read())
+
+    page_queue = queue.Queue()
+    for page in range(2, last_page + 1):
+        page_queue.put(page)
+
+    def thread_function():
+        while True:
+            try:
+                page = page_queue.get(block=False)
+            except queue.Empty:
+                return
+            
+            response = response_for_api_path(base_uri + f"&page={page}")
+            parsed_pages[page - 1] = json.loads(response.read())
+            print(".", end="", flush=True)
+            page_queue.task_done()
+    
+    for _ in range(num_threads):
+        Thread(target=thread_function, daemon=True).start()
+
+    # not immediately using .join() as it blocks Ctrl+C / KeyboardInterrupt from exiting the program.
+    while not page_queue.empty():
+        time.sleep(0.1)
+    page_queue.join()
 
     results = []
-    response_data = json.loads(response.read())
-    results.extend(response_to_result_items(response_data))
-
-    for page in range(2, last_page + 1):
-        response = response_for_api_path(base_uri + f"&page={page}")
-        results.extend(response_to_result_items(json.loads(response.read())))
-        print(".", end="", flush=True)
+    for parsed_page in parsed_pages:
+        results.extend(response_to_result_items(parsed_page))
     
     print("\nDone\n")
 
     return results
 
 
-def get_pull_requests_using_search(repo: str, filter_author: Optional[str] = None) -> list[PullRequest]:
+def get_pull_requests_using_search(repo: str, num_threads: int, filter_author: Optional[str] = None) -> list[PullRequest]:
     def get_search_link(per_page: int = 100):
         uri = f"https://api.github.com/search/issues?per_page={per_page}&q=is:pr+repo:{repo}"
         if filter_author:
@@ -133,12 +155,12 @@ def get_pull_requests_using_search(repo: str, filter_author: Optional[str] = Non
         ]
     
     print(f"Getting pull requests for {repo} using GitHub's search API")
-    pull_request_list = collect_paginated_json_results(get_search_link(), response_to_result_items)
+    pull_request_list = collect_paginated_json_results(get_search_link(), response_to_result_items, num_threads)
     pull_requests_by_id = {pr.id: pr for pr in pull_request_list}   # to ensure no duplicates due to new PRs while traversing pages
     return list(pull_requests_by_id.values())
 
 
-def get_pull_requests_using_pulls(repo: str) -> list[PullRequest]:
+def get_pull_requests_using_pulls(repo: str, num_threads: int) -> list[PullRequest]:
     uri = f"https://api.github.com/repos/{repo}/pulls?state=all&per_page=100"
 
     def response_to_result_items(json_object: object) -> list[PullRequest]:
@@ -152,12 +174,12 @@ def get_pull_requests_using_pulls(repo: str) -> list[PullRequest]:
         ]
 
     print(f"Getting pull requests for {repo} using GitHub's pulls API")
-    pull_request_list = collect_paginated_json_results(uri, response_to_result_items)
+    pull_request_list = collect_paginated_json_results(uri, response_to_result_items, num_threads)
     pull_requests_by_id = {pr.id: pr for pr in pull_request_list}   # to ensure no duplicates due to new PRs while traversing pages
     return list(pull_requests_by_id.values())
 
 
-def annotate_changes(pull_request: PullRequest):
+def annotate_changes(pull_request: PullRequest) -> None:
     diff_response = response_for_api_path(pull_request.api_url, content_type="application/vnd.github.diff")
     diff_response_encoding = diff_response.headers.get_charsets()[0]
     pull_request.changes = unidiff.PatchSet(diff_response, encoding=diff_response_encoding)
@@ -236,8 +258,6 @@ if __name__ == "__main__":
     parser.add_argument("--include-unmerged", action="store_true", help="include unmerged pull requests")
     args = parser.parse_args()
     
-    # TODO: Initial requests in parallel (parse maximum page, go through pages)
-
     if args.token:
         GITHUB_TOKEN = args.token
 
@@ -248,9 +268,9 @@ if __name__ == "__main__":
         print(f"Using exclude globs {exclude_globs}\n")
 
     if args.filter_author:
-        pull_requests = get_pull_requests_using_search(args.repository, args.filter_author)
+        pull_requests = get_pull_requests_using_search(args.repository, args.filter_author, args.num_parallel_requests)
     else:
-        pull_requests = get_pull_requests_using_pulls(args.repository)
+        pull_requests = get_pull_requests_using_pulls(args.repository, args.num_parallel_requests)
 
     if args.verbose:
         print(f"Found {len(pull_requests)} PRs: {[pr.id for pr in pull_requests]}\n")
