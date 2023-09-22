@@ -107,7 +107,7 @@ def collect_paginated_json_results(base_uri: str, response_to_result_items: Call
         results.extend(response_to_result_items(json.loads(response.read())))
         print(".", end="", flush=True)
     
-    print(" Done")
+    print("\nDone\n")
 
     return results
 
@@ -228,16 +228,16 @@ DEFAULT_EXCLUDE_GLOBS = [
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Summarize contributions based on GitHub pull requests")
     parser.add_argument("repository", help="GitHub repo, in the form 'user/repo'")
+    parser.add_argument("-t", "--token", help="GitHub API token to use for authorization. Use for more relaxed rate limiting")
     parser.add_argument("-a", "--filter-author", help="include only pull requests created by this user")
     parser.add_argument("-d", "--disable-default-exclude-globs", help=f"do not apply the default exclusion globs ({DEFAULT_EXCLUDE_GLOBS})", action="store_true")
-    parser.add_argument("-e", "--exclude-glob", nargs="*", action="extend", help="add a glob for files to exclude")
+    parser.add_argument("-e", "--exclude-glob", nargs="*", action="extend", help="add globs for files to exclude")
+    parser.add_argument("--exclude-pr", nargs="*", action="extend", type=int, help="exclude specific pull requests by their number from analysis")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detailed information about what changes are included")
     parser.add_argument("-n", "--num-parallel-requests", default=10, help="number of parallel requests to retrieve pull request changes")
-    parser.add_argument("-t", "--token", help="GitHub API token to use for authorization. Use for more relaxed rate limiting")
     parser.add_argument("--include-unmerged", action="store_true", help="include unmerged pull requests")
     args = parser.parse_args()
 
-    # TODO: add flag to exclude specific PRs (e.g. because they introduced automatic code formatting)
     # TODO: Name ok? Veröffentlichen?
     
     # TODO: Initial requests in parallel (parse maximum page, go through pages)
@@ -272,12 +272,17 @@ if __name__ == "__main__":
         pull_requests = [pr for pr in pull_requests if pr.merged]
         print("")
     
+    if args.exclude_pr:
+        excluded_ids_set = set(args.exclude_pr)
+        filtered_pull_requests = [pr for pr in pull_requests if pr.id not in excluded_ids_set]
+        print(f"Ignoring {len(pull_requests) - len(filtered_pull_requests)} explicitly excluded pull requests\n")
+        pull_requests = filtered_pull_requests
+
     annotate_changes_parallel(pull_requests, args.num_parallel_requests)
     user_statistics = build_statistics_per_user(pull_requests, exclude_globs)
 
     for (user, stats) in sorted(user_statistics.items(), key=lambda pair: pair[1], reverse=True):
         total_changes = stats.total_changes
-        print("")
         print(f"{user}: {stats.pull_requests} PRs. "
               + f"Total changes: {total_changes}. "
               + f"Average per PR: (+{(total_changes.additions / stats.pull_requests):.1f}, -{(total_changes.deletions / stats.pull_requests):.1f})")
@@ -291,3 +296,5 @@ if __name__ == "__main__":
 
         for (path, changes) in sorted_change_pairs:
             print(f"    {path} {changes}")
+        
+        print("")
