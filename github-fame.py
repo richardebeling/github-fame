@@ -3,6 +3,7 @@
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import cached_property
 import http.client
 import json
 import pathlib
@@ -35,32 +36,29 @@ class PullRequest:
 class ChangeStats:
     additions: int = 0
     deletions: int = 0
-    
-    def __eq__(self, other):
-        return (self.additions, self.deletions) == (other.additions, other.deletions)
 
     def __lt__(self, other):
-        if self.additions + self.deletions == other.additions + other.deletions:
-            return self.additions < other.additions
-        
-        return self.additions + self.deletions < other.additions + other.deletions
+        return (self.additions + self.deletions, self.additions) < (other.additions + other.deletions, other.additions)
     
     def __str__(self):
         return f"(+{self.additions}, -{self.deletions})"
     
 
-@dataclass
+@dataclass(eq=False)
 class UserStatistics:
     pull_requests: int = 0
     files_touched: dict[str, ChangeStats] = field(default_factory=lambda: defaultdict(ChangeStats))
 
-    @property
+    @cached_property
     def total_changes(self):
         result = ChangeStats()
         for stat in self.files_touched.values():
             result.additions += stat.additions
             result.deletions += stat.deletions
         return result
+    
+    def __lt__(self, other):
+        return (self.total_changes, self.pull_requests) < (other.total_changes, other.pull_requests)
 
 
 def response_for_api_path(uri: str, content_type: str = "application/vnd.github+json") -> http.client.HTTPResponse:
