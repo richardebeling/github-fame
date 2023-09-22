@@ -251,7 +251,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--token", help="GitHub API token to use for authorization. Use for more relaxed rate limiting")
     parser.add_argument("-a", "--filter-author", help="include only pull requests created by this user")
     parser.add_argument("-d", "--disable-default-exclude-globs", help=f"do not apply the default exclusion globs ({DEFAULT_EXCLUDE_GLOBS})", action="store_true")
-    parser.add_argument("-e", "--exclude-glob", nargs="*", action="extend", help="add globs for files to exclude")
+    parser.add_argument("-e", "--exclude-glob", nargs="*", action="extend", default=[], help="add globs for files to exclude")
     parser.add_argument("--exclude-pr", nargs="*", action="extend", type=int, help="exclude specific pull requests by their number from analysis")
     parser.add_argument("-v", "--verbose", action="store_true", help="show detailed information about what changes are included")
     parser.add_argument("-n", "--num-parallel-requests", default=10, help="number of parallel requests to retrieve pull request changes")
