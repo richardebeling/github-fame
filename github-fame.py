@@ -32,11 +32,35 @@ class PullRequest:
 
 
 @dataclass
-class UserStatistics:
-    pull_requests: int = 0
+class ChangeStats:
     additions: int = 0
     deletions: int = 0
-    files_touched: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    
+    def __eq__(self, other):
+        return (self.additions, self.deletions) == (other.additions, other.deletions)
+
+    def __lt__(self, other):
+        if self.additions + self.deletions == other.additions + other.deletions:
+            return self.additions < other.additions
+        
+        return self.additions + self.deletions < other.additions + other.deletions
+    
+    def __str__(self):
+        return f"(+{self.additions}, -{self.deletions})"
+    
+
+@dataclass
+class UserStatistics:
+    pull_requests: int = 0
+    files_touched: dict[str, ChangeStats] = field(default_factory=lambda: defaultdict(ChangeStats))
+
+    @property
+    def total_changes(self):
+        result = ChangeStats()
+        for stat in self.files_touched.values():
+            result.additions += stat.additions
+            result.deletions += stat.deletions
+        return result
 
 
 def response_for_api_path(uri: str, content_type: str = "application/vnd.github+json") -> http.client.HTTPResponse:
@@ -189,9 +213,8 @@ def build_statistics_per_user(pull_requests: Iterable[PullRequest], exclude_glob
                 print(f"Counting {path} (+{patched_file.added}, -{patched_file.removed})")
 
             # This handles renamed files correctly (as the diff doesn't show changes, just "rename from X" and "rename to Y")
-            user_statistics[pull_request.author].additions += patched_file.added
-            user_statistics[pull_request.author].deletions += patched_file.removed
-            user_statistics[pull_request.author].files_touched[path] += patched_file.added + patched_file.removed
+            user_statistics[pull_request.author].files_touched[path].additions += patched_file.added
+            user_statistics[pull_request.author].files_touched[path].deletions += patched_file.removed
 
     return user_statistics
 
@@ -219,8 +242,6 @@ if __name__ == "__main__":
     
     # TODO: Initial requests in parallel (parse maximum page, go through pages)
     # TODO: Exclude globs can't use ** -- use regex instead? Or just cope with it? (fixed in python3.13)
-    # TODO: File stats: Separate additions and deletions, but still sort by sum
-    # TODO: File stats: show total number of files touched in "top 5" line
     # TODO: Maybe get rid of unidiff dependency?
 
     if args.token:
@@ -254,18 +275,19 @@ if __name__ == "__main__":
     annotate_changes_parallel(pull_requests, args.num_parallel_requests)
     user_statistics = build_statistics_per_user(pull_requests, exclude_globs)
 
-    for (user, stats) in sorted(user_statistics.items()):
+    for (user, stats) in sorted(user_statistics.items(), key=lambda pair: pair[1], reverse=True):
+        total_changes = stats.total_changes
         print("")
         print(f"{user}: {stats.pull_requests} PRs. "
-              + f"Total changes: (+{stats.additions}, -{stats.deletions}). "
-              + f"Average per PR: (+{(stats.additions / stats.pull_requests):.1f}, -{(stats.deletions / stats.pull_requests):.1f})")
+              + f"Total changes: {total_changes}. "
+              + f"Average per PR: (+{(total_changes.additions / stats.pull_requests):.1f}, -{(total_changes.deletions / stats.pull_requests):.1f})")
         
-        sorted_change_pairs = sorted(stats.files_touched.items(), key=lambda pair: (-pair[1], pair[0]))
+        sorted_change_pairs = sorted(stats.files_touched.items(), key=lambda pair: pair[1], reverse=True)
         if args.verbose:
             print("Files changed:")
         else:
-            print("Top 5 files changed:")
+            print(f"Top 5 files changed (out of {len(sorted_change_pairs)}):")
             sorted_change_pairs = sorted_change_pairs[0:5]
 
-        for (path, change_count) in sorted_change_pairs:
-            print(f"    {path} (+- {change_count})")
+        for (path, changes) in sorted_change_pairs:
+            print(f"    {path} {changes}")
