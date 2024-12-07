@@ -6,12 +6,12 @@ It goes through pull requests from the repository and sums up changes in the PRs
 It assumes that only an insignificant amount of changes in a PR are not from the person who created the PR. If this doesn't hold, it doesn't produce meaningful data.
 
 ## API quota usage
-To get the changes of one PR, the tools has to use one REST API request of the GitHub API. This means that for `N` pull requests, the tool **will issue `N` API requests. Make sure that this is not an issue for you** before using. For example, without an auth token, the tool will likely run into the [hourly limit of 60 requests](https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#rate-limits-for-requests-from-personal-accounts).
+To get the changes of one PR, the tool performs one API request with the GitHub API. For `N` pull requests, the tool **will issue `N` API requests. Make sure that this is not an issue for you** before using. Without an auth token, the tool will likely run into the [hourly limit of 60 requests](https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#rate-limits-for-requests-from-personal-accounts).
 
 ## Auth token: Less rate limiting, access to private repos
 To get more relaxed rate limiting, and thus faster execution, you can provide an auth token created via GitHub -> Settings -> Developer settings via `--token`. These are my observations:
 * A classic token with the `repo/public_repo` privilege extends the rate limiting for public repositories
-* A classic token with the full `repo` privilege ("Full control of private repositories") allowed access to private repositories that couldn't be accessed otherwise.
+* A classic token with the full `repo` privilege ("Full control of private repositories") allows access to private repositories that couldn't be accessed otherwise.
   Without the correct privileges, you will get a "422 Unprocessable Entity" HTTP error for the API requests.
 
 Keep in mind that tokens supplied via the command line will probably remain in some history file, so create a new token with just the required privileges and delete it immediately after use.
